@@ -3600,11 +3600,12 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
         # process_command() when the user runs /exit --delete or /quit --delete.
         # Ported from google-gemini/gemini-cli#19332.
         self._delete_session_on_exit = False
-        # /update: when set, run() executes relaunch() after prompt_toolkit
-        # has fully exited and cleaned up terminal modes.  Set by
-        # _handle_update_command() so the relaunch happens on the main thread,
-        # not the background process_loop thread.
+        # /update and /relaunch: when set, run() executes relaunch() after
+        # prompt_toolkit has fully exited and cleaned up terminal modes.  Set by
+        # slash handlers so the relaunch happens on the main thread, not the
+        # background process_loop thread.
         self._pending_relaunch: list[str] | None = None
+        self._pending_relaunch_preserve_inherited: bool = False
         self._last_ctrl_c_time = 0
         self._clarify_state = None
         self._clarify_freetext = False
@@ -7348,6 +7349,8 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
                 _cprint(f"  {_DIM}✗ Unknown argument: {_escape(_args)}. Use /exit --delete to also remove session history.{_RST}")
                 return True
             return False
+        elif canonical == "relaunch":
+            return not self._handle_relaunch_command()
         elif canonical == "help":
             self.show_help()
         elif canonical == "profile":
@@ -14098,14 +14101,18 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
             self._print_exit_summary()
             self._release_active_session()
 
-        # Deferred relaunch: /update sets _pending_relaunch so the exec
-        # happens here — after prompt_toolkit has exited and fully restored
-        # terminal modes — rather than from the background process_loop
-        # thread (which would skip terminal cleanup on POSIX and only exit
-        # the worker thread on Windows).
-        if getattr(self, '_pending_relaunch', None):
+        # Deferred relaunch: /update and /relaunch set _pending_relaunch so the
+        # exec happens here — after prompt_toolkit has exited and fully restored
+        # terminal modes — rather than from the background process_loop thread
+        # (which would skip terminal cleanup on POSIX and only exit the worker
+        # thread on Windows). ``[]`` is a valid relaunch arg list for sessions
+        # without an ID, so check for None rather than truthiness.
+        if getattr(self, '_pending_relaunch', None) is not None:
             from hermes_cli.relaunch import relaunch
-            relaunch(self._pending_relaunch, preserve_inherited=False)
+            relaunch(
+                self._pending_relaunch,
+                preserve_inherited=getattr(self, '_pending_relaunch_preserve_inherited', False),
+            )
 
 
 # ============================================================================

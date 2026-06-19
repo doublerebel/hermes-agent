@@ -2216,6 +2216,28 @@ class CLICommandsMixin:
         args = SimpleNamespace(lines=200, expire=7, local=False)
         run_debug_share(args)
 
+    def _handle_relaunch_command(self) -> bool:
+        """Handle /relaunch — restart the CLI and resume this session.
+
+        The actual exec happens after prompt_toolkit exits in ``HermesCLI.run()``.
+        Deferring keeps terminal cleanup on the main thread while preserving the
+        current session ID for ``--resume`` and inherited launch flags such as
+        ``--profile``/``--model``.
+        """
+        print()
+        print("  ↻ Relaunching Hermes...")
+        print()
+
+        args: list[str] = []
+        session_id = getattr(self, "session_id", None)
+        if session_id:
+            args.extend(["--resume", session_id])
+
+        self._pending_relaunch = args
+        self._pending_relaunch_preserve_inherited = True
+        return True
+
+
     def _handle_update_command(self) -> bool:
         """Handle /update — update Hermes Agent to the latest version.
 
@@ -2266,6 +2288,7 @@ class CLICommandsMixin:
         # and only exit the worker thread on Windows (subprocess.run +
         # sys.exit inside a non-main thread does not exit the process).
         self._pending_relaunch = ["update"]
+        self._pending_relaunch_preserve_inherited = False
         return True
 
     def _handle_voice_command(self, command: str):
