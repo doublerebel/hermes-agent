@@ -4407,6 +4407,34 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
         except Exception:
             return [("class:status-bar", f" {self._build_status_bar_text()} ")]
 
+    @staticmethod
+    def _status_bar_window_style() -> str:
+        """Style the whole status-bar row, including cells beyond fragments."""
+        return "class:status-bar"
+
+    def _build_status_bar_widget(self):
+        """Build the prompt_toolkit status-bar container."""
+        return ConditionalContainer(
+            Window(
+                content=FormattedTextControl(lambda: self._get_status_bar_fragments()),
+                height=1,
+                style=self._status_bar_window_style(),
+                # Prevent fragments that overflow the terminal width from
+                # wrapping onto a second line, which causes the status bar to
+                # appear duplicated (one full + one partial row) during long
+                # sessions, especially on SSH where shutil.get_terminal_size
+                # may return stale values.  _get_status_bar_fragments now reads
+                # width from prompt_toolkit's own output object, so fragments
+                # will always fit; wrap_lines=False is the belt-and-suspenders
+                # guard against any future width mismatch.
+                wrap_lines=False,
+            ),
+            filter=Condition(
+                lambda: self._status_bar_visible
+                and not getattr(self, "_status_bar_suppressed_after_resize", False)
+            ),
+        )
+
     def _normalize_model_for_provider(self, resolved_provider: str) -> bool:
         """Normalize provider-specific model IDs and routing."""
         current_model = (self.model or "").strip()
@@ -13415,25 +13443,7 @@ class HermesCLI(CLIAgentSetupMixin, CLICommandsMixin):
             filter=Condition(lambda: cli_ref._voice_mode),
         )
 
-        status_bar = ConditionalContainer(
-            Window(
-                content=FormattedTextControl(lambda: cli_ref._get_status_bar_fragments()),
-                height=1,
-                # Prevent fragments that overflow the terminal width from
-                # wrapping onto a second line, which causes the status bar to
-                # appear duplicated (one full + one partial row) during long
-                # sessions, especially on SSH where shutil.get_terminal_size
-                # may return stale values.  _get_status_bar_fragments now reads
-                # width from prompt_toolkit's own output object, so fragments
-                # will always fit; wrap_lines=False is the belt-and-suspenders
-                # guard against any future width mismatch.
-                wrap_lines=False,
-            ),
-            filter=Condition(
-                lambda: cli_ref._status_bar_visible
-                and not getattr(cli_ref, "_status_bar_suppressed_after_resize", False)
-            ),
-        )
+        status_bar = cli_ref._build_status_bar_widget()
 
         # Allow wrapper CLIs to register extra keybindings.
         self._register_extra_tui_keybindings(kb, input_area=input_area)

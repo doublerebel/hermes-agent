@@ -1,10 +1,19 @@
+import re
 import time
 from datetime import datetime, timedelta
+from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import cli as cli_mod
 from cli import HermesCLI
+from prompt_toolkit.application import Application
+from prompt_toolkit.data_structures import Size
+from prompt_toolkit.layout import HSplit, Layout, Window
+from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.output.vt100 import Vt100_Output
+from prompt_toolkit.renderer import Renderer
+from prompt_toolkit.styles import Style
 
 
 def _make_cli(model: str = "anthropic/claude-sonnet-4-20250514"):
@@ -540,6 +549,7 @@ class TestStatusBarWidthSource:
     def test_fragments_fit_within_announced_width(self):
         """Total fragment text length must not exceed the width used to build them."""
         from unittest.mock import MagicMock, patch
+
         cli_obj = self._make_wide_cli()
 
         for width in (40, 52, 76, 80, 120, 200):
@@ -556,9 +566,71 @@ class TestStatusBarWidthSource:
                 f"({total_text!r})"
             )
 
+    def test_status_bar_renders_full_width_ansi_after_zero_second_boundary(self):
+        """A short 0s status must emit visible background across the row."""
+        cli_obj = self._make_wide_cli()
+        cli_obj._prompt_start_time = None
+        cli_obj._prompt_duration = 0.0
+        cli_obj._last_turn_finished_at = time.time()
+
+        width = 160
+        output_buffer = StringIO()
+        output = Vt100_Output(
+            output_buffer,
+            get_size=lambda: Size(rows=1, columns=width),
+            term="xterm-256color",
+        )
+        style = Style.from_dict(
+            {
+                "status-bar": "bg:#1a1a2e #C0C0C0",
+                "status-bar-strong": "bg:#1a1a2e #FFD700 bold",
+                "status-bar-dim": "bg:#1a1a2e #8B8682",
+                "status-bar-good": "bg:#1a1a2e #8FBC8F bold",
+                "status-bar-warn": "bg:#1a1a2e #FFD700 bold",
+                "status-bar-bad": "bg:#1a1a2e #FF8C00 bold",
+                "status-bar-critical": "bg:#1a1a2e #FF6B6B bold",
+                "status-bar-yolo": "bg:#1a1a2e #FF4444 bold",
+            }
+        )
+        app = Application(
+            layout=Layout(
+                HSplit(
+                    [
+                        Window(
+                            content=FormattedTextControl(
+                                lambda: cli_obj._get_status_bar_fragments()
+                            ),
+                            height=1,
+                            style=getattr(cli_obj, "_status_bar_window_style", lambda: "")(),
+                            wrap_lines=False,
+                        )
+                    ]
+                )
+            ),
+            style=style,
+            output=output,
+            full_screen=False,
+        )
+
+        Renderer(style=style, output=output, full_screen=False).render(app, app.layout)
+
+        ansi = output_buffer.getvalue()
+        assert "⏲ 0s" in ansi
+        tail = ansi[ansi.index("⏲ 0s") :]
+        assert "48;5;234m" in tail
+
+        erase_index = tail.find("\x1b[K")
+        if erase_index != -1:
+            sgrs_before_erase = re.findall(r"\x1b\[[0-9;]*m", tail[:erase_index])
+            assert sgrs_before_erase
+            assert "48;5;234" in sgrs_before_erase[-1]
+        else:
+            assert " " * 20 in tail
+
     def test_fragments_use_pt_width_over_shutil(self):
         """When prompt_toolkit reports a width, shutil.get_terminal_size must not be used."""
         from unittest.mock import MagicMock, patch
+
         cli_obj = self._make_wide_cli()
 
         mock_app = MagicMock()
@@ -573,6 +645,7 @@ class TestStatusBarWidthSource:
     def test_fragments_fall_back_to_shutil_when_no_app(self):
         """Outside a TUI context (no running app), shutil must be used as fallback."""
         from unittest.mock import MagicMock, patch
+
         cli_obj = self._make_wide_cli()
 
         with patch("prompt_toolkit.application.get_app", side_effect=Exception("no app")), \
@@ -585,12 +658,13 @@ class TestStatusBarWidthSource:
     def test_build_status_bar_text_uses_pt_width(self):
         """_build_status_bar_text() must also prefer prompt_toolkit width."""
         from unittest.mock import MagicMock, patch
+
         cli_obj = self._make_wide_cli()
 
         mock_app = MagicMock()
         mock_app.output.get_size.return_value = MagicMock(columns=80)
 
-        with patch("prompt_toolkit.application.get_app", return_value=mock_app), \
+        with patch("prompt_toolkit.application.get_app", return_value=mock_app) as mock_get_app, \
              patch("shutil.get_terminal_size") as mock_shutil:
             text = cli_obj._build_status_bar_text()  # no explicit width
 
@@ -600,7 +674,6 @@ class TestStatusBarWidthSource:
 
     def test_explicit_width_skips_pt_lookup(self):
         """An explicit width= argument must bypass both PT and shutil lookups."""
-        from unittest.mock import patch
         cli_obj = self._make_wide_cli()
 
         with patch("prompt_toolkit.application.get_app") as mock_get_app, \
