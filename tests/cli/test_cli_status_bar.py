@@ -548,8 +548,6 @@ class TestStatusBarWidthSource:
 
     def test_fragments_fit_within_announced_width(self):
         """Total fragment text length must not exceed the width used to build them."""
-        from unittest.mock import MagicMock, patch
-
         cli_obj = self._make_wide_cli()
 
         for width in (40, 52, 76, 80, 120, 200):
@@ -629,14 +627,12 @@ class TestStatusBarWidthSource:
 
     def test_fragments_use_pt_width_over_shutil(self):
         """When prompt_toolkit reports a width, shutil.get_terminal_size must not be used."""
-        from unittest.mock import MagicMock, patch
-
         cli_obj = self._make_wide_cli()
 
         mock_app = MagicMock()
         mock_app.output.get_size.return_value = MagicMock(columns=120)
 
-        with patch("prompt_toolkit.application.get_app", return_value=mock_app) as mock_get_app, \
+        with patch("prompt_toolkit.application.get_app", return_value=mock_app), \
              patch("shutil.get_terminal_size") as mock_shutil:
             cli_obj._get_status_bar_fragments()
 
@@ -644,8 +640,6 @@ class TestStatusBarWidthSource:
 
     def test_fragments_fall_back_to_shutil_when_no_app(self):
         """Outside a TUI context (no running app), shutil must be used as fallback."""
-        from unittest.mock import MagicMock, patch
-
         cli_obj = self._make_wide_cli()
 
         with patch("prompt_toolkit.application.get_app", side_effect=Exception("no app")), \
@@ -657,14 +651,12 @@ class TestStatusBarWidthSource:
 
     def test_build_status_bar_text_uses_pt_width(self):
         """_build_status_bar_text() must also prefer prompt_toolkit width."""
-        from unittest.mock import MagicMock, patch
-
         cli_obj = self._make_wide_cli()
 
         mock_app = MagicMock()
         mock_app.output.get_size.return_value = MagicMock(columns=80)
 
-        with patch("prompt_toolkit.application.get_app", return_value=mock_app) as mock_get_app, \
+        with patch("prompt_toolkit.application.get_app", return_value=mock_app), \
              patch("shutil.get_terminal_size") as mock_shutil:
             text = cli_obj._build_status_bar_text()  # no explicit width
 
